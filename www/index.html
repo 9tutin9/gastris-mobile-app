@@ -86,13 +86,37 @@ async function scanQr() {
   try {
     const perm = await BS.requestPermissions();
     if (perm.camera !== 'granted') { setStatus('Kamera nemá oprávnění', true); return; }
+    // Google ML Kit čtečka stahuje svůj modul z Play Services až on-demand. Na čerstvém
+    // telefonu chybí → 'googlebarcodescanner module is not available'. Nainstaluj ho předem.
+    try {
+      if (BS.isGoogleBarcodeScannerModuleAvailable) {
+        const av = await BS.isGoogleBarcodeScannerModuleAvailable();
+        if (av && av.available === false && BS.installGoogleBarcodeScannerModule) {
+          setStatus('Stahuji Google čtečku (jednorázově, pár s)…', false);
+          await BS.installGoogleBarcodeScannerModule();
+          // Instalace běží na pozadí přes Play Services — počkej, než je modul k dispozici.
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const a2 = await BS.isGoogleBarcodeScannerModuleAvailable();
+            if (a2 && a2.available) break;
+          }
+        }
+      }
+    } catch (_) { /* starší verze pluginu metody nemá → zkusíme rovnou scan */ }
+    setStatus('Namiř na QR…', false);
     const { barcodes } = await BS.scan({ formats: ['QR_CODE'] });
     if (barcodes && barcodes.length) {
       document.getElementById('srv-url').value = (barcodes[0].rawValue || barcodes[0].displayValue || '').trim();
       connect();
     }
   } catch (e) {
-    if (!/cancel/i.test(e.message || '')) setStatus('Chyba scanneru: ' + (e.message || e), true);
+    const msg = e.message || String(e);
+    if (/cancel/i.test(msg)) return;
+    if (/module is not available|not available|still/i.test(msg)) {
+      setStatus('Google čtečka se ještě stahuje (chvíli to trvá). Zkus skenovat znovu za pár vteřin, nebo vlož odkaz ručně.', true);
+    } else {
+      setStatus('Chyba scanneru: ' + msg, true);
+    }
   }
 }
 
