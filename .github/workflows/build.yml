@@ -26,6 +26,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Legacy balíček 'tools' Google ze SDK odstranil → default akce na něm padá.
+          # cmdline-tools instaluje akce sama; stačí platform-tools (zbytek dotáhne Gradle).
+          packages: 'platform-tools'
 
       - name: Install npm dependencies
         run: npm install
