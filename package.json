@@ -1,0 +1,19 @@
+{
+  "name": "gastris-mobile-app",
+  "version": "1.0.0",
+  "description": "GastrIS Číšník — native Android wrapper pro PWA číšnické appky. Párovací QR přes ML Kit.",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Static web bundle, no build step.'",
+    "cap:add-android": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor-mlkit/barcode-scanning": "^6.2.0"
+  }
+}

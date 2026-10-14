@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GastrIS — spárovat zařízení</title>
+<style>
+  :root { --bg:#0f0f0f; --surface:#1a1d24; --surface2:#232732; --border:#333947;
+          --text:#e8eaed; --text3:#9aa0ac; --accent:#2563eb; --green:#10b981; --red:#e05252; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system,system-ui,sans-serif; background:var(--bg); color:var(--text);
+         min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 18px; }
+  h1 { font-size:24px; margin:0 0 2px; }
+  .sub { color:var(--text3); font-size:14px; text-align:center; margin-bottom:22px; }
+  .card { width:100%; max-width:400px; }
+  label { font-size:13px; color:var(--text3); display:block; margin:14px 0 6px; }
+  .input { width:100%; padding:14px; border-radius:10px; border:2px solid var(--border);
+           background:var(--surface2); color:var(--text); font-size:16px; }
+  .input:focus { outline:none; border-color:var(--accent); }
+  .btn { width:100%; padding:14px; border-radius:10px; border:0; font-size:16px; font-weight:700;
+         cursor:pointer; margin-top:10px; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-ghost { background:var(--surface2); color:var(--text); }
+  .status { font-size:13px; text-align:center; margin-top:14px; min-height:18px; }
+  .logo { font-size:44px; margin-bottom:8px; }
+  .divider { text-align:center; color:var(--text3); font-size:12px; margin:16px 0 4px; }
+  .hint { color:var(--text3); font-size:12px; text-align:center; margin-top:18px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <div class="logo">🍽️</div>
+  <h1>GastrIS</h1>
+  <div class="sub">Spáruj zařízení s kasou</div>
+
+  <div class="card">
+    <button class="btn btn-primary" id="qr-btn" onclick="scanQr()">📷 Naskenovat QR z kasy</button>
+
+    <div class="divider">— nebo vlož odkaz ručně —</div>
+    <label for="srv-url">Odkaz z kasy (pod QR kódem)</label>
+    <input id="srv-url" class="input" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+           placeholder="https://kasa.tailXXXX.ts.net/?wt=…">
+    <button class="btn btn-ghost" onclick="connect()">Připojit</button>
+    <div class="status" id="status"></div>
+
+    <div class="hint">
+      QR najdeš na kase: <b>Nastavení → Zařízení → Vytvořit QR</b>.<br>
+      Vyber číšníka a režim (číšník / kuchyně).
+    </div>
+  </div>
+
+<script>
+'use strict';
+
+function isNative() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
+// GastrIS párovací QR nese PLNOU adresu uzlu s jednorázovým tokenem a režimem:
+//   https://uzel.tailXXXX.ts.net/?wt=<kód>&mode=waiter
+// Vrátíme { base, claim }: base = čistý origin (pro restarty), claim = plná URL
+// s tokenem (jednorázové přihlášení zařízení). Když uživatel vloží jen holou
+// adresu bez ?wt, claim == base (appka pak jen ukáže přihlášení uzlu).
+function parsePairing(raw) {
+  let s = (raw || '').trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+  try {
+    const u = new URL(s);
+    return { base: u.origin, claim: u.origin + u.pathname + u.search };
+  } catch (_) { return null; }
+}
+
+function setStatus(msg, err) {
+  const el = document.getElementById('status');
+  el.textContent = msg; el.style.color = err ? 'var(--red)' : 'var(--green)';
+}
+
+async function scanQr() {
+  if (!isNative()) {
+    const v = prompt('Vlož odkaz z kasy (obsah QR):', '');
+    if (v) { document.getElementById('srv-url').value = v.trim(); connect(); }
+    return;
+  }
+  const BS = (window.Capacitor.Plugins || {}).BarcodeScanner;
+  if (!BS) { setStatus('Scanner není dostupný', true); return; }
+  try {
+    const perm = await BS.requestPermissions();
+    if (perm.camera !== 'granted') { setStatus('Kamera nemá oprávnění', true); return; }
+    const { barcodes } = await BS.scan({ formats: ['QR_CODE'] });
+    if (barcodes && barcodes.length) {
+      document.getElementById('srv-url').value = (barcodes[0].rawValue || barcodes[0].displayValue || '').trim();
+      connect();
+    }
+  } catch (e) {
+    if (!/cancel/i.test(e.message || '')) setStatus('Chyba scanneru: ' + (e.message || e), true);
+  }
+}
+
+async function connect() {
+  const p = parsePairing(document.getElementById('srv-url').value);
+  if (!p) { setStatus('Neplatný odkaz z kasy', true); return; }
+  setStatus('Ověřuji spojení s kasou…', false);
+  try {
+    // no-cors: launcher běží z lokálního bundlu (jiný origin) → netečeme tělo,
+    // jen ověříme dosažitelnost uzlu (DNS/TLS/TCP). Po přesměrování na uzel už
+    // appka běží ze stejného originu → žádné CORS.
+    await fetch(p.base + '/api/health', { mode: 'no-cors', cache: 'no-store' });
+  } catch (e) {
+    setStatus('❌ Kasa nedosažitelná — zkontroluj síť / Tailscale', true); return;
+  }
+  setStatus('✓ Připojuji…', false);
+  const SS = (window.Capacitor && window.Capacitor.Plugins) ? window.Capacitor.Plugins.GastrisServer : null;
+  if (SS && SS.setServer) {
+    try {
+      // base = origin pro běžné restarty; claim = jednorázová URL s ?wt (první
+      // přihlášení zařízení). Nativně uloží + recreate() → uzel se načte jako origin.
+      await SS.setServer({ url: p.base, claimUrl: p.claim });
+      return;
+    } catch (e) { setStatus('Chyba párování: ' + (e.message || e), true); return; }
+  }
+  // Web fallback (prohlížeč): klasická navigace na claim URL (bez nativního scanneru)
+  window.location.href = p.claim;
+}
+</script>
+</body>
+</html>

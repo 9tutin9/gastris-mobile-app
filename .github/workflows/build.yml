@@ -1,0 +1,195 @@
+name: Build GastrIS Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Inject native GastrisServer plugin + custom MainActivity
+        # Univerzální APK: adresa kasy NENÍ zapečená. Launcher (www) po naskenování
+        # párovacího QR zavolá GastrisServer.setServer({url,claimUrl}) → uloží + restart.
+        # MainActivity při PRVNÍM startu po spárování načte claim URL (s ?wt tokenem →
+        # zařízení se přihlásí), při dalších restartech čistý origin (bez tokenu →
+        # auto-přihlášení z uloženého JWT). Nativní bridge (ML Kit scanner párovacího
+        # QR) jede jen na server.url originu, proto ho nastavíme jako config.
+        run: |
+          PKG_DIR=android/app/src/main/java/cz/gastris/app
+          mkdir -p "$PKG_DIR"
+
+          cat > "$PKG_DIR/GastrisServer.java" <<'JAVAEOF'
+          package cz.gastris.app;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "GastrisServer")
+          public class GastrisServer extends Plugin {
+
+              private SharedPreferences prefs() {
+                  return getContext().getSharedPreferences("gastris", Context.MODE_PRIVATE);
+              }
+
+              @PluginMethod
+              public void setServer(PluginCall call) {
+                  String url = call.getString("url");
+                  if (url == null || url.trim().isEmpty()) {
+                      call.reject("url chybi");
+                      return;
+                  }
+                  // claimUrl = jednorázová adresa s ?wt tokenem (první přihlášení zařízení);
+                  // když chybí, použij base. Base (url) je autoritativní pro restarty.
+                  String claim = call.getString("claimUrl");
+                  if (claim == null || claim.trim().isEmpty()) claim = url;
+                  prefs().edit()
+                      .putString("server_url", url.trim())
+                      .putString("claim_url", claim.trim())
+                      .putBoolean("just_paired", true)
+                      .commit();
+                  call.resolve();
+                  getActivity().runOnUiThread(() -> getActivity().recreate());
+              }
+
+              @PluginMethod
+              public void clearServer(PluginCall call) {
+                  prefs().edit().remove("server_url").remove("claim_url").commit();
+                  call.resolve();
+                  getActivity().runOnUiThread(() -> getActivity().recreate());
+              }
+
+              @PluginMethod
+              public void getServer(PluginCall call) {
+                  JSObject ret = new JSObject();
+                  ret.put("url", prefs().getString("server_url", null));
+                  call.resolve(ret);
+              }
+          }
+          JAVAEOF
+
+          cat > "$PKG_DIR/MainActivity.java" <<'JAVAEOF'
+          package cz.gastris.app;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.CapConfig;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(GastrisServer.class);
+
+                  SharedPreferences prefs = getSharedPreferences("gastris", Context.MODE_PRIVATE);
+                  String base = prefs.getString("server_url", null);
+                  String claim = prefs.getString("claim_url", null);
+                  boolean justPaired = prefs.getBoolean("just_paired", false);
+                  // Studeny start bez sparovani -> www launcher (sken QR).
+                  // Prvni start po sparovani (justPaired) -> nacti claim URL (s ?wt),
+                  //   pak claim_url zahod, aby dalsi restarty sly na cisty origin.
+                  // Bezne restarty -> cisty origin (server_url) -> auto-prihlaseni z JWT.
+                  String loadUrl = null;
+                  if (base != null && !base.trim().isEmpty()) {
+                      if (justPaired) {
+                          prefs.edit().putBoolean("just_paired", false).remove("claim_url").commit();
+                          loadUrl = (claim != null && !claim.trim().isEmpty()) ? claim.trim() : base.trim();
+                      } else {
+                          loadUrl = base.trim();
+                      }
+                  }
+                  if (loadUrl != null) {
+                      // server.url = uzel -> jeho origin se zaregistruje jako Capacitor
+                      // authority a bridge script se scope-uje na nej -> window.Capacitor
+                      // je injectnute i na strance uzlu -> nativni ML Kit ctecka jede uvnitr.
+                      // load() cte prave this.config (BridgeActivity), proto ho nastavime.
+                      this.config = new CapConfig.Builder(this)
+                              .setServerUrl(loadUrl)
+                              .setAndroidScheme("https")
+                              .setAllowMixedContent(true)
+                              .setAllowNavigation(new String[]{
+                                      "*.ts.net", "*.*.ts.net", "*.*.*.ts.net",
+                                      "100.*.*.*", "192.168.*.*", "10.*.*.*", "172.16.*.*"})
+                              .create();
+                  }
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          JAVAEOF
+
+          echo "--- GastrisServer.java ---"; cat "$PKG_DIR/GastrisServer.java"
+          echo "--- MainActivity.java ---"; cat "$PKG_DIR/MainActivity.java"
+
+      - name: Patch AndroidManifest with CAMERA permission
+        run: |
+          MANIFEST=./android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n\n    <application|' "$MANIFEST"
+          fi
+          echo "--- Patched manifest: ---"
+          cat "$MANIFEST"
+
+      - name: Make gradlew executable
+        run: chmod +x ./android/gradlew
+
+      - name: Build debug APK
+        working-directory: ./android
+        run: ./gradlew assembleDebug
+
+      - name: Re-sign with consistent key (uber-apk-signer)
+        # Podpis KONZISTENTNIM vlozenym debug klicem -> nova APK se nainstaluje
+        # PRES predchozi bez odinstalace (Android vyzaduje stejny podpis).
+        run: |
+          curl -sL -o uber-apk-signer.jar \
+            https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+          java -jar uber-apk-signer.jar \
+            --apks ./android/app/build/outputs/apk/debug/app-debug.apk \
+            --allowResign --overwrite
+          cp ./android/app/build/outputs/apk/debug/app-debug.apk ./gastris-cisnik.apk
+          echo "--- Signed APK: ---"
+          ls -la ./gastris-cisnik.apk
+
+      - name: Publish APK to stavis-releases (distribuce na telefony)
+        # Podepsana APK jako asset verejneho release 9tutin9/stavis-releases
+        # (tag gastris-android) — presne tam miri QR "Stahnout appku" v Nastaveni
+        # GastrISu. Release assety NEjdou z kvoty Actions artefaktu.
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload gastris-android ./gastris-cisnik.apk \
+            --repo 9tutin9/stavis-releases --clobber
+          echo "Publikovano: https://github.com/9tutin9/stavis-releases/releases/download/gastris-android/gastris-cisnik.apk"
