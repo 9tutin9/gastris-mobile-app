@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # ať GITHUB_TOKEN může vytvořit/nahrát release v TOMTO repu
 
     steps:
       - name: Checkout code
@@ -187,13 +189,17 @@ jobs:
           echo "--- Signed APK: ---"
           ls -la ./gastris-cisnik.apk
 
-      - name: Publish APK to stavis-releases (distribuce na telefony)
-        # Podepsana APK jako asset verejneho release 9tutin9/stavis-releases
-        # (tag gastris-android) — presne tam miri QR "Stahnout appku" v Nastaveni
-        # GastrISu. Release assety NEjdou z kvoty Actions artefaktu.
+      - name: Publish APK to release (distribuce na telefony)
+        # Podepsana APK jako asset release 'android' v TOMTO (verejnem) repu přes
+        # vestavěný GITHUB_TOKEN — ŽÁDNÝ extra secret/PAT (Stefan 100% nezávislý).
+        # Presne sem miri QR "Stahnout appku" v Nastaveni GastrISu. Release assety
+        # NEjdou z kvoty Actions artefaktu. Release vytvoř, když ještě není.
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload gastris-android ./gastris-cisnik.apk \
-            --repo 9tutin9/stavis-releases --clobber
-          echo "Publikovano: https://github.com/9tutin9/stavis-releases/releases/download/gastris-android/gastris-cisnik.apk"
+          gh release view android --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create android --repo "$GITHUB_REPOSITORY" \
+                 --title "GastrIS Číšník — Android" \
+                 --notes "Nativní Android appka GastrIS (WebView obal číšnické PWA). Aktualizuje CI při každém pushi."
+          gh release upload android ./gastris-cisnik.apk --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Publikovano: https://github.com/$GITHUB_REPOSITORY/releases/download/android/gastris-cisnik.apk"

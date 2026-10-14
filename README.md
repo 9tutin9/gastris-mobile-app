@@ -40,12 +40,12 @@ Push do `main` spustí `.github/workflows/build.yml`:
 3. Injektne nativní `GastrisServer` plugin + vlastní `MainActivity` (balíček `cz.gastris.app`)
 4. Doplní CAMERA permission, `./gradlew assembleDebug`
 5. Re-sign konzistentním klíčem (uber-apk-signer) → update se nainstaluje přes předchozí
-6. Nahraje `gastris-cisnik.apk` jako asset veřejného release `9tutin9/stavis-releases`
-   tag `gastris-android` → přesně tam míří QR „Stáhnout appku" v Nastavení GastrISu.
+6. Nahraje `gastris-cisnik.apk` jako asset release `android` v TOMTO (veřejném) repu
+   přes vestavěný `GITHUB_TOKEN` → přesně tam míří QR „Stáhnout appku" v Nastavení
+   GastrISu. **Žádný extra secret/PAT** — build je plně samostatný.
 
-**Předpoklad:** repo musí mít secret `RELEASES_TOKEN` (PAT s právem zápisu do
-`9tutin9/stavis-releases`) — stejný jako u `stavis-mobile-app`. Release/tag
-`gastris-android` musí v `stavis-releases` existovat (CI jen nahrává asset).
+Odkaz na APK (stabilní, přepisuje se při každém buildu):
+`https://github.com/9tutin9/gastris-mobile-app/releases/download/android/gastris-cisnik.apk`
 
 ## Update
 
