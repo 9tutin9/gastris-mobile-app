@@ -284,9 +284,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view android --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create android --repo "$GITHUB_REPOSITORY" \
-                 --title "GastrIS Číšník — Android" \
+          # main → ostrý release 'android' (sem míří QR Stáhnout appku).
+          # jiná větev (např. viva-tap-to-pay) → oddělený 'android-test' → NEpřepíše
+          # živý scanner APK, Stefan si testovací APK nainstaluje ručně z linku.
+          TAG="android"; TITLE="GastrIS Číšník — Android"
+          if [ "${GITHUB_REF_NAME:-main}" != "main" ]; then
+            TAG="android-test"; TITLE="GastrIS Číšník — TEST ($GITHUB_REF_NAME)"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease \
+                 --title "$TITLE" \
                  --notes "Nativní Android appka GastrIS (WebView obal číšnické PWA). Aktualizuje CI při každém pushi."
-          gh release upload android ./gastris-cisnik.apk --repo "$GITHUB_REPOSITORY" --clobber
-          echo "Publikovano: https://github.com/$GITHUB_REPOSITORY/releases/download/android/gastris-cisnik.apk"
+          gh release upload "$TAG" ./gastris-cisnik.apk --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Publikovano: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/gastris-cisnik.apk"
