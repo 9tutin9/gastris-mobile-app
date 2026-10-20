@@ -128,6 +128,7 @@ jobs:
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   registerPlugin(GastrisServer.class);
+                  registerPlugin(VivaTerminal.class);
 
                   SharedPreferences prefs = getSharedPreferences("gastris", Context.MODE_PRIVATE);
                   String base = prefs.getString("server_url", null);
@@ -165,8 +166,73 @@ jobs:
           }
           JAVAEOF
 
+          cat > "$PKG_DIR/VivaTerminal.java" <<'JAVAEOF'
+          package cz.gastris.app;
+
+          import android.content.Intent;
+          import android.content.ActivityNotFoundException;
+          import android.net.Uri;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          // App-to-app platba kartou přes Viva.com Terminal appku (SoftPOS/Tap-to-Pay)
+          // na STEJNÉM telefonu. Spustí deeplink `vivapayclient://pay/v1?action=sale...`
+          // → host přiloží kartu → Viva vrátí výsledek do callback URI
+          // `cz.gastris.app.viva://result?...`, který WebView zachytí přes @capacitor/app
+          // appUrlOpen (manifest má pro scheme intent-filter). Párování request↔výsledek
+          // přes clientTransactionId (= číslo účtu). Pro Sklípkův vlastní účet BEZ ISV
+          // parametrů — Viva appka je přihlášená jeho účtem a autorizuje sama.
+          @CapacitorPlugin(name = "VivaTerminal")
+          public class VivaTerminal extends Plugin {
+
+              @PluginMethod
+              public void pay(PluginCall call) {
+                  Double amount = call.getDouble("amount");          // v Kč
+                  if (amount == null || amount <= 0) { call.reject("Neplatná částka"); return; }
+                  long minor = Math.round(amount * 100);              // Viva chce haléře (minor units)
+                  String ref = call.getString("reference", "");
+                  boolean receipt = Boolean.TRUE.equals(call.getBoolean("showReceipt", false));
+                  String callback = getContext().getPackageName() + ".viva://result";
+
+                  StringBuilder u = new StringBuilder("vivapayclient://pay/v1")
+                          .append("?action=sale")
+                          .append("&amount=").append(minor)
+                          .append("&appId=").append(getContext().getPackageName())
+                          .append("&show_receipt=").append(receipt)
+                          .append("&show_transaction_result=true");
+                  if (ref != null && !ref.isEmpty()) {
+                      u.append("&clientTransactionId=").append(Uri.encode(ref));
+                  }
+                  u.append("&callback=").append(Uri.encode(callback));
+
+                  try {
+                      Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(u.toString()));
+                      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                      getContext().startActivity(i);
+                      call.resolve();   // launch OK; výsledek dorazí přes appUrlOpen (callback scheme)
+                  } catch (ActivityNotFoundException e) {
+                      call.reject("Viva.com Terminal appka není nainstalovaná");
+                  }
+              }
+
+              // Je Viva Terminal appka na telefonu? (UI schová tlačítko když ne)
+              @PluginMethod
+              public void isAvailable(PluginCall call) {
+                  Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("vivapayclient://pay/v1"));
+                  boolean ok = probe.resolveActivity(getContext().getPackageManager()) != null;
+                  JSObject r = new JSObject();
+                  r.put("available", ok);
+                  call.resolve(r);
+              }
+          }
+          JAVAEOF
+
           echo "--- GastrisServer.java ---"; cat "$PKG_DIR/GastrisServer.java"
           echo "--- MainActivity.java ---"; cat "$PKG_DIR/MainActivity.java"
+          echo "--- VivaTerminal.java ---"; cat "$PKG_DIR/VivaTerminal.java"
 
       - name: Patch AndroidManifest with CAMERA permission + ML Kit module auto-download
         run: |
@@ -179,6 +245,13 @@ jobs:
           # 'googlebarcodescanner module is not available'. Vlozime pred prvni <activity>.
           if ! grep -q "com.google.mlkit.vision.DEPENDENCIES" "$MANIFEST"; then
             sed -i '0,/<activity/s|<activity|<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />\n        <activity|' "$MANIFEST"
+          fi
+          # Callback scheme pro app-to-app platbu kartou: Viva.com Terminal vrátí výsledek
+          # na cz.gastris.app.viva://result → WebView ho chytí přes @capacitor/app appUrlOpen.
+          # Přidá druhý intent-filter do MainActivity (hned za MAIN/LAUNCHER; trik se
+          # zavírací/otevírací značkou drží XML vyvážené).
+          if ! grep -q "cz.gastris.app.viva" "$MANIFEST"; then
+            sed -i 's#<category android:name="android.intent.category.LAUNCHER" />#<category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="cz.gastris.app.viva" />#' "$MANIFEST"
           fi
           echo "--- Patched manifest: ---"
           cat "$MANIFEST"
