@@ -42,9 +42,10 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Generate app launcher icons (SKYsoftware)
-        # Jednotná ikona "S" (SKYsoftware) z assets/ (icon-only + adaptivní
-        # foreground/background) → Android mipmapy + adaptivní ikona. Bez tohoto
+      - name: Generate app launcher icons (GastrIS "G")
+        # Ikona "G" (GastrIS) z assets/ (icon-only + adaptivní foreground; background
+        # = sdílený gradient) → Android mipmapy + adaptivní ikona. Každý produkt má
+        # svoje písmeno (StavIS=S, GastrIS=G, UctoIS=U). Bez tohoto
         # by appka jela s default Capacitor ikonou. continue-on-error: kdyby
         # generátor zlobil, build (a scanner fix) stejně projde se starou ikonou.
         continue-on-error: true
