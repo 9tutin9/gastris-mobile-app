@@ -203,7 +203,9 @@ jobs:
                           .append("&amount=").append(minor)
                           .append("&appId=").append(getContext().getPackageName())
                           .append("&show_receipt=").append(receipt)
-                          .append("&show_transaction_result=true");
+                          // false = Viva se po zaplacení hned vrátí do naší appky (callback),
+                          // nezůstane viset na svém výsledkovém okně; potvrzení ukáže náš účet.
+                          .append("&show_transaction_result=false");
                   if (ref != null && !ref.isEmpty()) {
                       u.append("&clientTransactionId=").append(Uri.encode(ref));
                   }
