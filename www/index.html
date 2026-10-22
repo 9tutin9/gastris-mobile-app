@@ -33,6 +33,10 @@
   <div class="sub">Spáruj zařízení s kasou</div>
 
   <div class="card">
+    <button class="btn btn-primary" onclick="vivaTest()" style="background:var(--green);">💳 TEST platby kartou (1 Kč)</button>
+    <div class="status" id="viva-status" style="white-space:pre-wrap;text-align:left;"></div>
+
+    <div class="divider">— párování zařízení —</div>
     <button class="btn btn-primary" id="qr-btn" onclick="scanQr()">📷 Naskenovat QR z kasy</button>
 
     <div class="divider">— nebo vlož odkaz ručně —</div>
@@ -50,6 +54,41 @@
 
 <script>
 'use strict';
+
+// ─── TEST platby kartou přes Vivu (bez párování/serveru) ──────────────────────
+function vivaPlugin() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.VivaTerminal) || null;
+}
+async function vivaTest() {
+  const el = document.getElementById('viva-status');
+  const set = (m, err) => { el.textContent = m; el.style.color = err ? 'var(--red)' : 'var(--green)'; };
+  const plugins = Object.keys((window.Capacitor && window.Capacitor.Plugins) || {});
+  const p = vivaPlugin();
+  if (!p) { set('❌ Viva plugin NENÍ v appce (starý APK). Dostupné pluginy: [' + plugins.join(', ') + ']', true); return; }
+  let avail = null;
+  try { const r = await p.isAvailable(); avail = !!(r && r.available); }
+  catch (e) { set('isAvailable() chyba: ' + (e.message || e), true); return; }
+  set('Viva plugin ✓   isAvailable=' + avail + '\nSpouštím platbu 1 Kč… (měla by vyskočit Viva)', false);
+  try {
+    await p.pay({ amount: 1, reference: 'TEST' + Date.now(), showReceipt: false });
+  } catch (e) {
+    set('Viva plugin ✓   isAvailable=' + avail + '\n❌ pay() chyba: ' + (e.message || e), true);
+  }
+}
+// Výsledek z Vivy se vrací přes callback (cz.gastris.app.viva://result?...) → vypiš ho.
+(function () {
+  try {
+    const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (App && App.addListener) {
+      App.addListener('appUrlOpen', (data) => {
+        const url = (data && data.url) || '';
+        if (url.toLowerCase().indexOf('viva') < 0) return;
+        const el = document.getElementById('viva-status');
+        if (el) { el.style.color = 'var(--green)'; el.textContent = '↩️ Viva vrátila:\n' + url; }
+      });
+    }
+  } catch (_) {}
+})();
 
 function isNative() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
