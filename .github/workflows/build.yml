@@ -243,8 +243,14 @@ jobs:
           # Android 11+ (API 30+) package visibility: bez <queries> appka "nevidí" jiné
           # appky → resolveActivity(vivapayclient://) vrací null → isAvailable=false i když
           # je Viva Terminal nainstalovaná. Deklarujeme schéma, ať ji smíme vidět i spustit.
-          if ! grep -q "<queries" "$MANIFEST"; then
-            sed -i 's|<application|<queries>\n        <intent>\n            <action android:name="android.intent.action.VIEW" />\n            <data android:scheme="vivapayclient" />\n        </intent>\n    </queries>\n\n    <application|' "$MANIFEST"
+          # Capacitor generuje <queries> sám → musíme vložit náš <intent> DOVNITŘ,
+          # ne přidávat druhý blok (guard na "<queries" by jinak sed přeskočil).
+          if ! grep -q "vivapayclient" "$MANIFEST"; then
+            if grep -q "<queries>" "$MANIFEST"; then
+              sed -i 's|<queries>|<queries>\n        <intent>\n            <action android:name="android.intent.action.VIEW" />\n            <data android:scheme="vivapayclient" />\n        </intent>|' "$MANIFEST"
+            else
+              sed -i 's|<application|<queries>\n        <intent>\n            <action android:name="android.intent.action.VIEW" />\n            <data android:scheme="vivapayclient" />\n        </intent>\n    </queries>\n\n    <application|' "$MANIFEST"
+            fi
           fi
           # Google ML Kit Code Scanner modul si Play Services STÁHNE AUTOMATICKY po instalaci
           # appky (meta-data uvnitr <application>). Jinak se stahuje az pri 1. skenu -> chyba
