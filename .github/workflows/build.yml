@@ -209,6 +209,22 @@ jobs:
                   if (ref != null && !ref.isEmpty()) {
                       u.append("&clientTransactionId=").append(Uri.encode(ref));
                   }
+                  // ISV parametry (rev-share) — appka je předá z nastavení Sklípku (NE natvrdo
+                  // v kódu; repo je veřejné → secret nesmí uniknout). Minimum pro ISV: clientId,
+                  // clientSecret, sourceCode + ISV_amount (poplatek ISV v haléřích). Když nejsou
+                  // nastavené, platba jede postaru na vlastní účet podniku (bez rev-share).
+                  String isvId = call.getString("isvClientId", "");
+                  String isvSecret = call.getString("isvClientSecret", "");
+                  String isvSource = call.getString("isvSourceCode", "");
+                  if (isvId != null && !isvId.isEmpty() && isvSecret != null && !isvSecret.isEmpty()
+                          && isvSource != null && !isvSource.isEmpty()) {
+                      Double isvFee = call.getDouble("isvAmount");   // v Kč; default 0
+                      long isvMinor = (isvFee != null && isvFee > 0) ? Math.round(isvFee * 100) : 0;
+                      u.append("&ISV_amount=").append(isvMinor)
+                       .append("&ISV_clientId=").append(Uri.encode(isvId))
+                       .append("&ISV_clientSecret=").append(Uri.encode(isvSecret))
+                       .append("&ISV_sourceCode=").append(Uri.encode(isvSource));
+                  }
                   u.append("&callback=").append(Uri.encode(callback));
 
                   try {
