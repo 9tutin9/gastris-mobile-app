@@ -284,8 +284,20 @@ jobs:
           if ! grep -q "cz.gastris.app.viva" "$MANIFEST"; then
             sed -i 's#<category android:name="android.intent.category.LAUNCHER" />#<category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="cz.gastris.app.viva" />#' "$MANIFEST"
           fi
+          # launchMode=singleTask na MainActivity: při přepnutí do Viva Terminal appky a zpět
+          # se WebView NESMÍ recreatnout (jinak process death → _vivaPending zmizí → callback
+          # se nedoručí → spadne 3min timeout, ačkoli karta BYLA stržena → riziko dvojího
+          # stržení). Vložíme hned za android:name MainActivity (robustní na pořadí atributů).
+          if ! grep -q 'android:launchMode="singleTask"' "$MANIFEST"; then
+            sed -i -E 's#(android:name="[^"]*MainActivity")#\1 android:launchMode="singleTask"#' "$MANIFEST"
+          fi
           echo "--- Patched manifest: ---"
           cat "$MANIFEST"
+          # Pojistka: callback scheme i launchMode MUSÍ v manifestu být, jinak se výsledek
+          # platby nevrátí / WebView se recreatne → shoď build hned (regrese se chytí v CI).
+          grep -q "cz.gastris.app.viva" "$MANIFEST" || { echo "CHYBA: callback scheme cz.gastris.app.viva není v manifestu"; exit 1; }
+          grep -q "vivapayclient" "$MANIFEST" || { echo "CHYBA: <queries> pro vivapayclient chybí"; exit 1; }
+          grep -q 'android:launchMode="singleTask"' "$MANIFEST" || { echo "CHYBA: launchMode=singleTask se nevložil"; exit 1; }
 
       - name: Make gradlew executable
         run: chmod +x ./android/gradlew
