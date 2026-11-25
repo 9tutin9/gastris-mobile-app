@@ -220,10 +220,20 @@ jobs:
                           && isvSource != null && !isvSource.isEmpty()) {
                       Double isvFee = call.getDouble("isvAmount");   // v Kč; default 0
                       long isvMinor = (isvFee != null && isvFee > 0) ? Math.round(isvFee * 100) : 0;
+                      // ISV_currencyCode je POVINNÝ pro ISV (Viva Sale spec „Required for ISV
+                      // integration"). ISO 4217 numeric: CZK=203 (default), 978=EUR. BEZ NĚJ Viva
+                      // nemá u ISV části měnu → zahodí ji a zúčtuje obyčejný prodej → poplatek = 0.
+                      String isvCur = call.getString("isvCurrencyCode", "203");
+                      if (isvCur == null || isvCur.isEmpty()) isvCur = "203";
                       u.append("&ISV_amount=").append(isvMinor)
                        .append("&ISV_clientId=").append(Uri.encode(isvId))
                        .append("&ISV_clientSecret=").append(Uri.encode(isvSecret))
-                       .append("&ISV_sourceCode=").append(Uri.encode(isvSource));
+                       .append("&ISV_sourceCode=").append(Uri.encode(isvSource))
+                       .append("&ISV_currencyCode=").append(Uri.encode(isvCur));
+                      // Zrcadli referenci do ISV exportu (Merchant Reference) kvůli párování rev-share.
+                      if (ref != null && !ref.isEmpty()) {
+                          u.append("&ISV_clientTransactionId=").append(Uri.encode(ref));
+                      }
                   }
                   u.append("&callback=").append(Uri.encode(callback));
 
